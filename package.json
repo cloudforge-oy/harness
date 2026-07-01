@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@cline/core": "^0.0.54",
+    "tsx": "^4.22.4"
+  }
+}
