@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;" />
+  <title>Harness</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="topbar-left">
+      <span class="logo">&#10035;</span>
+      <span class="app-title">Harness</span>
+    </div>
+    <div class="topbar-right">
+      <button id="cwd-chip" class="chip" title="Change working directory">~</button>
+      <button id="new-session" class="icon-btn" title="New session">+</button>
+    </div>
+  </header>
+
+  <div id="token-banner" class="banner hidden">
+    CLOUDCODE_TOKEN is not set &mdash; requests to the gateway will fail.
+    Launch with <code>CLOUDCODE_TOKEN=sk-... npm start</code>.
+  </div>
+
+  <main id="chat">
+    <div id="empty-state">
+      <div class="empty-logo">&#10035;</div>
+      <div class="empty-title">Harness</div>
+      <div class="empty-hint">Agent sessions on @cline/core via cloudcode.one</div>
+      <div class="empty-cwd" id="empty-cwd"></div>
+    </div>
+  </main>
+
+  <footer id="composer-area">
+    <div id="status-row" class="hidden">
+      <span class="spinner"></span>
+      <span id="status-text">Working&hellip;</span>
+      <span id="usage-text"></span>
+      <button id="stop-btn" class="chip danger">Stop</button>
+    </div>
+    <div id="composer">
+      <textarea id="prompt-input" rows="1"
+                placeholder="Ask Harness to do something&hellip;"></textarea>
+      <div class="composer-bottom">
+        <select id="model-select" title="Model"></select>
+        <span class="composer-spacer"></span>
+        <span class="composer-hint">&#9166; to send &middot; shift+&#9166; newline</span>
+        <button id="send-btn" title="Send">&#8593;</button>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

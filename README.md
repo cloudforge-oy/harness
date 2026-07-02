@@ -1,1 +1,62 @@
 # harness
+
+Agent harness on [@cline/core](https://www.npmjs.com/package/@cline/core) talking to the
+cloudcode.one `/v1/messages` gateway, plus an Electron desktop app with a Claude-Code-style
+chat UI.
+
+## Layout
+
+- `cloudcode-harness.ts` — session wiring: config, tool-approval hook, MCP helpers, `runAgentSession()`
+- `cloudcode-smoke.ts` — SDK capability probe + live gateway smoke test
+- `app/` — Electron app
+  - `main.mjs` — main process; hosts the agent session and bridges it over IPC
+  - `preload.cjs` — context-isolated bridge (`window.harness`)
+  - `renderer/` — chat UI (streaming text, thinking, tool cards, permission prompts)
+
+## Run
+
+```bash
+npm install
+CLOUDCODE_TOKEN=sk-... npm start
+```
+
+Optional env: `CLOUDCODE_BASE_URL` (default `https://api.cloudcode.one/v1`),
+`CLOUDCODE_MODEL` (default `deepseek-v4-pro`).
+
+Note: if launching from a shell where `ELECTRON_RUN_AS_NODE` is set (e.g. a VS Code
+terminal), unset it first: `env -u ELECTRON_RUN_AS_NODE npm start`.
+
+On Ubuntu 23.10+ the first launch may abort with "The SUID sandbox helper binary was
+found, but is not configured correctly" (AppArmor restricts unprivileged user
+namespaces, and npm can't install Chromium's fallback helper setuid-root). Fix once
+per Electron install:
+
+```bash
+sudo chown root:root node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+```
+
+(or, dev-only: `ELECTRON_DISABLE_SANDBOX=1 npm start`).
+
+## UI development without a token
+
+`HARNESS_DEMO=1 npm start` replays a canned event stream (thinking, streaming text,
+a gated `bash` tool call with its permission prompt, markdown, usage) so the renderer
+can be exercised offline. `HARNESS_SCREENSHOT=/path.png` captures the window and exits
+(`HARNESS_SCREENSHOT_DELAY` in ms, default 1500).
+
+## Smoke test
+
+```bash
+npm run smoke                      # phase 1: offline SDK surface probe
+CLOUDCODE_TOKEN=sk-... npm run smoke   # + phase 2: one live gateway turn
+```
+
+## How the app works
+
+The main process imports `cloudcode-harness.ts` directly (tsx registers a TS loader)
+and starts sessions with `runAgentSession()`. Core session events stream to the
+renderer over `session:event`; gated tools (`bash`, `editor`, `apply-patch`) block in
+the `beforeTool` hook until the user answers the inline permission prompt
+(`approval:request` / `approval:respond`). Follow-up prompts go through
+`cline.send()` on the same session; the **+** button starts a fresh session.
