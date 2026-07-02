@@ -51,8 +51,8 @@ const CLOUDCODE_BASE_URL = process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudc
 const CLOUDCODE_TOKEN = process.env.CLOUDCODE_TOKEN ?? "";
 
 const KNOWN_MODELS = {
-  "deepseek-v4-pro":   { maxTokens: 8192, contextWindow: 128_000, supportsImages: false, inputPrice: 0, outputPrice: 0 },
-  "deepseek-v4-flash": { maxTokens: 8192, contextWindow: 128_000, supportsImages: false, inputPrice: 0, outputPrice: 0 },
+  "deepseek-v4-pro":   { maxTokens: 8192, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
+  "deepseek-v4-flash": { maxTokens: 8192, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
 } as unknown as CoreSessionConfig["knownModels"];
 
 // ===========================================================================
