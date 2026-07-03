@@ -8,9 +8,12 @@
  *   cline.send({ sessionId, prompt, mode })                (follow-up turns)
  *   cline.stop(sessionId)              -> graceful session stop (NOT stopSession)
  *
- * CoreSessionConfig approval levers (both verified settable):
- *   toolPolicies?: Record<string,{ enabled?; autoApprove? }>   // "*" = wildcard
- *   hooks?: AgentHooks  ( = Partial<AgentRuntimeHooks>: beforeTool/afterTool/... )
+ * Tool approval levers (both required together for interactive approval):
+ *   config.toolPolicies?: Record<string,{ enabled?; autoApprove? }>   // "*" = wildcard
+ *   start({ capabilities: { requestToolApproval } })  // the async gate core awaits
+ * NOTE: hooks.beforeTool is NOT an approval mechanism — the runtime enforces
+ * toolPolicies AFTER hooks run, and a gated tool fails with "requires approval
+ * but no approval callback is configured" unless requestToolApproval is set.
  *
  * MCP (traced via runtime/orchestration/runtime-builder.ts):
  *   - file path: servers auto-loaded from resolveDefaultMcpSettingsPath()
@@ -33,14 +36,9 @@ import type {
   CoreSessionConfig,
   CoreSessionEvent,
   McpServerRegistration,
+  ToolApprovalRequest,
+  ToolApprovalResult,
 } from "@cline/core";
-
-// NOTE: the beforeTool context/result types live in @cline/shared in 0.0.54, NOT @cline/core.
-// Instead of importing them by name (they can move/rename pre-1.0), derive them straight from
-// the config's own hook type so this stays correct no matter where they're defined:
-type BeforeToolFn = NonNullable<NonNullable<CoreSessionConfig["hooks"]>["beforeTool"]>;
-type BeforeToolCtx = Parameters<BeforeToolFn>[0];
-type BeforeToolResult = Awaited<ReturnType<BeforeToolFn>>;
 
 // ===========================================================================
 // 1. cloudcode.one inference wiring (ties into the /v1/messages gateway spec)
@@ -60,18 +58,21 @@ const KNOWN_MODELS = {
 // 2. TOOL APPROVAL
 // ---------------------------------------------------------------------------
 // Two levers, used together:
-//   (a) toolPolicies  — mark which tools require approval (declarative)
-//   (b) hooks.beforeTool — the async gate that asks YOUR UI and denies/edits
+//   (a) toolPolicies — mark which tools require approval (declarative)
+//   (b) capabilities.requestToolApproval — the async gate core awaits for every
+//       autoApprove:false tool call; without it those calls FAIL with
+//       "requires approval but no approval callback is configured"
 // ===========================================================================
 
-/** Tools that must not run without explicit user approval. Everything else auto-approves. */
+/** Tools that must not run without explicit user approval. Everything else
+ *  auto-approves. Names must match the runtime's registered tools exactly
+ *  (see name:"..." in @cline/core dist): run_commands / editor / apply_patch. */
 const TOOL_POLICIES: CoreSessionConfig["toolPolicies"] = {
-  // key = tool name (e.g. "bash", "editor", "apply-patch") or "*" for all
-  bash: { autoApprove: false },
+  run_commands: { autoApprove: false },
   editor: { autoApprove: false },
-  "apply-patch": { autoApprove: false },
+  apply_patch: { autoApprove: false },
   // read-only tools are fine to auto-run (omit them => default enabled + autoApprove)
-  // "file-read": { autoApprove: true }, "search": { autoApprove: true },
+  // read_files / search_codebase / fetch_web_content
 };
 
 /** Your UI resolves this. Return true to run the tool, false (or a reason) to deny. */
@@ -83,37 +84,25 @@ export type ApprovalResolver = (req: {
 }) => Promise<{ approved: boolean; reason?: string }>;
 
 /**
- * beforeTool gate. Runs before every tool call. For gated tools it awaits the
- * frontend's decision; you can also bake in hard policy (deny bash matching a
- * denylist without even asking).
+ * Adapts our UI resolver to core's requestToolApproval capability. Core calls
+ * this for every autoApprove:false tool call and awaits the decision; the
+ * agent loop is naturally paused on the await. You can also bake in hard
+ * policy here (deny a command matching a denylist without even asking).
  */
-function makeApprovalHook(resolve: ApprovalResolver, sessionId: () => string): CoreSessionConfig["hooks"] {
-  const beforeTool = async (ctx: BeforeToolCtx): Promise<BeforeToolResult | undefined> => {
-    const toolName = ctx.tool?.name ?? ctx.toolCall?.toolName ?? "unknown";
-
+function makeApprovalCapability(resolve: ApprovalResolver) {
+  return async (req: ToolApprovalRequest): Promise<ToolApprovalResult> => {
     // Optional hard policy — deny outright, never reaches the user:
-    // if (toolName === "bash" && /rm\s+-rf\s+\/(?!\w)/.test(String(ctx.input))) {
-    //   return { skip: true, reason: "Blocked: destructive command" };
+    // if (req.toolName === "run_commands" && /rm\s+-rf\s+\/(?!\w)/.test(String(req.input))) {
+    //   return { approved: false, reason: "Blocked: destructive command" };
     // }
-
-    // Only gate the tools we marked autoApprove:false (mirror TOOL_POLICIES):
-    const gated = TOOL_POLICIES && toolName in TOOL_POLICIES
-      && (TOOL_POLICIES as any)[toolName]?.autoApprove === false;
-    if (!gated) return undefined; // let it run
-
     const decision = await resolve({
-      sessionId: sessionId(),
-      toolCallId: (ctx.toolCall as any)?.toolCallId ?? "",
-      toolName,
-      input: ctx.input,
+      sessionId: req.sessionId,
+      toolCallId: req.toolCallId,
+      toolName: req.toolName,
+      input: req.input,
     });
-    if (!decision.approved) {
-      return { skip: true, reason: decision.reason ?? "Denied by user" };
-    }
-    return undefined; // approved -> proceed (return { input } here to run an edited input)
+    return { approved: decision.approved, reason: decision.reason };
   };
-
-  return { beforeTool } as CoreSessionConfig["hooks"];
 }
 
 // ===========================================================================
@@ -166,7 +155,6 @@ function cloudcodeConfig(opts: {
   cwd: string;
   systemPrompt: string;
   model?: string;
-  hooks?: CoreSessionConfig["hooks"];
 }): CoreSessionConfig {
   return {
     providerId: "anthropic",
@@ -181,7 +169,6 @@ function cloudcodeConfig(opts: {
     enableSpawnAgent: false,
     enableAgentTeams: false,
     toolPolicies: TOOL_POLICIES,           // <-- which tools need approval
-    hooks: opts.hooks,                     // <-- beforeTool approval gate
   } as CoreSessionConfig;
 }
 
@@ -202,17 +189,16 @@ export interface RunSessionArgs {
 
 export async function runAgentSession(args: RunSessionArgs) {
   const cline = await getCore();
-  let sid = "";
-  const hooks = makeApprovalHook(args.onApprovalRequest, () => sid);
 
   const unsubscribe = cline.subscribe((event: CoreSessionEvent) => args.onEvent(event));
   const { sessionId } = await cline.start({
-    config: cloudcodeConfig({ cwd: args.cwd, systemPrompt: args.systemPrompt, model: args.model, hooks }),
+    config: cloudcodeConfig({ cwd: args.cwd, systemPrompt: args.systemPrompt, model: args.model }),
     prompt: args.prompt,
     userImages: args.images,
     interactive: true,
+    // Client-owned capability core awaits for every toolPolicies-gated call.
+    capabilities: { requestToolApproval: makeApprovalCapability(args.onApprovalRequest) },
   });
-  sid = sessionId;
 
   return {
     sessionId,
@@ -227,22 +213,24 @@ export async function runAgentSession(args: RunSessionArgs) {
 /*
  * FRONTEND FLOW (approval)
  * ------------------------
- * 1. Session hits a gated tool -> beforeTool calls onApprovalRequest(...) and AWAITS.
+ * 1. Session hits a toolPolicies-gated tool -> core calls requestToolApproval(...) and AWAITS.
  * 2. Your backend forwards { toolCallId, toolName, input } to the browser over your WS.
  * 3. User taps Approve/Deny; the browser sends the decision back.
- * 4. Your backend resolves the pending promise -> beforeTool returns skip (deny) or proceeds.
+ * 4. Your backend resolves the pending promise -> core runs the tool or skips it with the reason.
  * The agent loop is naturally paused on the await; no polling needed.
  *
  * NOTES
  * -----
- * - Auto-approve everything (headless): drop `toolPolicies`/`hooks`, or set toolPolicies { "*": { autoApprove: true } }.
+ * - Auto-approve everything (headless): drop `toolPolicies` (and the capability),
+ *   or set toolPolicies { "*": { autoApprove: true } }.
  * - MCP file path is shared per host user by default; for multi-tenant use a per-user
  *   path and point the runtime at it (or use the programmatic path B for isolation).
- * - beforeTool can also enforce silent policy (denylists) without prompting the user.
+ * - requestToolApproval can also enforce silent policy (denylists) without prompting.
  * - Verified against @cline/core@0.0.54: ClineCore, InMemoryMcpManager,
  *   createDefaultMcpServerClientFactory, createMcpTools, registerMcpServersFromSettingsFile,
- *   resolveDefaultMcpSettingsPath, CoreSessionConfig, CoreSessionEvent, McpServerRegistration
- *   are all exported from the package root. The beforeTool context/result types are NOT in
- *   @cline/core (they live in @cline/shared) — that's why we derive them from CoreSessionConfig
- *   above. Re-run the smoke test after any version bump; 0.0.x surface can move.
+ *   resolveDefaultMcpSettingsPath, CoreSessionConfig, CoreSessionEvent, McpServerRegistration,
+ *   ToolApprovalRequest, ToolApprovalResult are all exported from the package root.
+ *   Tool names in toolPolicies must match the runtime's registered tools
+ *   (run_commands / editor / apply_patch / read_files / search_codebase / ...).
+ *   Re-run the smoke test after any version bump; 0.0.x surface can move.
  */
