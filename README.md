@@ -11,7 +11,8 @@ chat UI.
 - `app/` — Electron app
   - `main.mjs` — main process; hosts the agent session and bridges it over IPC
   - `preload.cjs` — context-isolated bridge (`window.harness`)
-  - `renderer/` — chat UI (streaming text, thinking, tool cards, permission prompts)
+  - `renderer/` — chat UI (streaming text, thinking, tool cards, permission prompts,
+    image attachments via the composer button or paste)
 
 ## Run
 
@@ -22,6 +23,10 @@ CLOUDCODE_TOKEN=sk-... npm start
 
 Optional env: `CLOUDCODE_BASE_URL` (default `https://api.cloudcode.one/v1`),
 `CLOUDCODE_MODEL` (default `deepseek-v4-pro`).
+
+If `CLOUDCODE_TOKEN` isn't set, the app prompts for it at startup (the warning
+banner reopens the prompt). A token entered this way is kept in the app's memory
+for that run only — it is never written to disk.
 
 Note: if launching from a shell where `ELECTRON_RUN_AS_NODE` is set (e.g. a VS Code
 terminal), unset it first: `env -u ELECTRON_RUN_AS_NODE npm start`.
@@ -43,7 +48,9 @@ sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 `HARNESS_DEMO=1 npm start` replays a canned event stream (thinking, streaming text,
 a gated `bash` tool call with its permission prompt, markdown, usage) so the renderer
 can be exercised offline. `HARNESS_SCREENSHOT=/path.png` captures the window and exits
-(`HARNESS_SCREENSHOT_DELAY` in ms, default 1500).
+(`HARNESS_SCREENSHOT_DELAY` in ms, default 1500). The theme follows the system until
+the topbar sun/moon button picks one explicitly (persisted in localStorage);
+`HARNESS_THEME=dark|light` overrides the system default at launch.
 
 ## Smoke test
 

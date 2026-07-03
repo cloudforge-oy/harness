@@ -7,7 +7,7 @@
  *   - session:event                                  (main -> renderer stream)
  *   - approval:request / approval:respond            (tool-approval round trip)
  */
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { register } from "tsx/esm/api";
@@ -50,13 +50,16 @@ async function closeSession() {
   await s.close().catch(() => {});
 }
 
+// HARNESS_THEME=dark|light forces the theme (useful with HARNESS_SCREENSHOT).
+if (process.env.HARNESS_THEME) nativeTheme.themeSource = process.env.HARNESS_THEME;
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1080,
     height: 780,
     minWidth: 420,
     minHeight: 400,
-    backgroundColor: "#1f1f1f",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
     title: "Harness",
     autoHideMenuBar: true,
     webPreferences: {
@@ -99,6 +102,13 @@ ipcMain.handle("app:info", () => ({
   versions: { electron: process.versions.electron, node: process.versions.node },
 }));
 
+// Token entered in the UI lives in this process's env only — never written to disk.
+ipcMain.handle("app:set-token", (_e, token) => {
+  const value = String(token ?? "").trim();
+  if (value) process.env.CLOUDCODE_TOKEN = value;
+  return { hasToken: Boolean(process.env.CLOUDCODE_TOKEN) };
+});
+
 ipcMain.handle("app:pick-folder", async () => {
   const res = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   return res.canceled ? null : res.filePaths[0];
@@ -109,6 +119,7 @@ ipcMain.handle("session:start", async (_e, args) => {
   const harness = await getHarness();
   session = await harness.runAgentSession({
     prompt: args.prompt,
+    images: args.images,
     cwd: args.cwd || process.cwd(),
     model: args.model,
     systemPrompt: args.systemPrompt || DEFAULT_SYSTEM_PROMPT,
@@ -123,9 +134,9 @@ ipcMain.handle("session:start", async (_e, args) => {
   return { sessionId: session.sessionId };
 });
 
-ipcMain.handle("session:send", async (_e, prompt) => {
+ipcMain.handle("session:send", async (_e, { prompt, images }) => {
   if (!session) throw new Error("No active session");
-  await session.send(prompt);
+  await session.send(prompt, images);
   return { sessionId: session.sessionId };
 });
 

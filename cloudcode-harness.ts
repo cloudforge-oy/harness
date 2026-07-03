@@ -47,8 +47,9 @@ type BeforeToolResult = Awaited<ReturnType<BeforeToolFn>>;
 // ===========================================================================
 // NOTE: the @cline/core anthropic provider appends "/messages" (not "/v1/messages") to
 // baseUrl, so the base MUST include the /v1 segment or the gateway returns 404 "Not Found".
-const CLOUDCODE_BASE_URL = process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudcode.one/v1";
-const CLOUDCODE_TOKEN = process.env.CLOUDCODE_TOKEN ?? "";
+// Read lazily (not at module load) so a host app can set the token after import.
+const cloudcodeBaseUrl = () => process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudcode.one/v1";
+const cloudcodeToken = () => process.env.CLOUDCODE_TOKEN ?? "";
 
 const KNOWN_MODELS = {
   "deepseek-v4-pro":   { maxTokens: 8192, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
@@ -170,8 +171,8 @@ function cloudcodeConfig(opts: {
   return {
     providerId: "anthropic",
     modelId: opts.model ?? "deepseek-v4-pro",
-    apiKey: CLOUDCODE_TOKEN,
-    baseUrl: CLOUDCODE_BASE_URL,           // <-- your gateway
+    apiKey: cloudcodeToken(),
+    baseUrl: cloudcodeBaseUrl(),           // <-- your gateway
     knownModels: KNOWN_MODELS,
     systemPrompt: opts.systemPrompt,
     cwd: opts.cwd,
@@ -189,6 +190,9 @@ function cloudcodeConfig(opts: {
 // ===========================================================================
 export interface RunSessionArgs {
   prompt: string;
+  /** Image attachments as data URLs ("data:image/png;base64,..."); the runtime
+   *  parses them into image content blocks (raw strings are assumed base64 PNG). */
+  images?: string[];
   cwd: string;
   systemPrompt: string;
   model?: string;
@@ -205,6 +209,7 @@ export async function runAgentSession(args: RunSessionArgs) {
   const { sessionId } = await cline.start({
     config: cloudcodeConfig({ cwd: args.cwd, systemPrompt: args.systemPrompt, model: args.model, hooks }),
     prompt: args.prompt,
+    userImages: args.images,
     interactive: true,
   });
   sid = sessionId;
@@ -212,7 +217,8 @@ export async function runAgentSession(args: RunSessionArgs) {
   return {
     sessionId,
     // runTurn/send takes a single SendSessionInput object in 0.0.54 (sessionId is a field).
-    send: (prompt: string) => cline.send({ sessionId, prompt, mode: "act" }),
+    send: (prompt: string, images?: string[]) =>
+      cline.send({ sessionId, prompt, mode: "act", userImages: images }),
     // graceful stop is cline.stop(sessionId) — there is no cline.stopSession() method.
     close: async () => { unsubscribe(); await cline.stop(sessionId); },
   };

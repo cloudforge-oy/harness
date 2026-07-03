@@ -9,9 +9,10 @@ const subscribe = (channel, cb) => {
 
 contextBridge.exposeInMainWorld("harness", {
   info: () => ipcRenderer.invoke("app:info"),
+  setToken: (token) => ipcRenderer.invoke("app:set-token", token),
   pickFolder: () => ipcRenderer.invoke("app:pick-folder"),
   startSession: (args) => ipcRenderer.invoke("session:start", args),
-  sendPrompt: (prompt) => ipcRenderer.invoke("session:send", prompt),
+  sendPrompt: (prompt, images) => ipcRenderer.invoke("session:send", { prompt, images }),
   stopSession: () => ipcRenderer.invoke("session:stop"),
   respondApproval: (id, approved, reason) =>
     ipcRenderer.send("approval:respond", { id, approved, reason }),

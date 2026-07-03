@@ -15,6 +15,13 @@ const modelSelect = document.getElementById("model-select");
 const cwdChip = document.getElementById("cwd-chip");
 const newSessionBtn = document.getElementById("new-session");
 const tokenBanner = document.getElementById("token-banner");
+const attachBtn = document.getElementById("attach-btn");
+const imageInput = document.getElementById("image-input");
+const attachmentsEl = document.getElementById("attachments");
+const tokenOverlay = document.getElementById("token-overlay");
+const tokenInput = document.getElementById("token-input");
+const tokenSaveBtn = document.getElementById("token-save");
+const tokenSkipBtn = document.getElementById("token-skip");
 
 const state = {
   cwd: "",
@@ -24,6 +31,7 @@ const state = {
   currentThinking: null,  // { el, bodyEl, raw }
   toolCards: new Map(),   // toolCallId -> card refs
   alwaysAllow: new Set(), // tool names auto-approved this session
+  attachments: [],        // { name, dataUrl } pending images for the next prompt
 };
 
 // ---------------------------------------------------------------------------
@@ -115,9 +123,19 @@ const oneLine = (v, max = 120) => {
 // ---------------------------------------------------------------------------
 // blocks
 // ---------------------------------------------------------------------------
-function addUserBlock(text) {
+function addUserBlock(text, images = []) {
   const block = el("div", "block user");
   const bubble = el("div", "bubble", text);
+  if (images.length) {
+    const strip = el("div", "bubble-images");
+    for (const src of images) {
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = "attached image";
+      strip.appendChild(img);
+    }
+    bubble.appendChild(strip);
+  }
   block.appendChild(bubble);
   addBlock(block);
 }
@@ -355,6 +373,58 @@ function handleCoreEvent(event) {
 }
 
 // ---------------------------------------------------------------------------
+// image attachments
+// ---------------------------------------------------------------------------
+function renderAttachments() {
+  attachmentsEl.innerHTML = "";
+  for (const [i, att] of state.attachments.entries()) {
+    const chip = el("div", "attachment");
+    const img = document.createElement("img");
+    img.src = att.dataUrl;
+    img.alt = att.name;
+    img.title = att.name;
+    const remove = el("button", "remove", "×");
+    remove.title = `Remove ${att.name}`;
+    remove.addEventListener("click", () => {
+      state.attachments.splice(i, 1);
+      renderAttachments();
+    });
+    chip.append(img, remove);
+    attachmentsEl.appendChild(chip);
+  }
+  attachmentsEl.classList.toggle("hidden", state.attachments.length === 0);
+}
+
+function addImageFiles(files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.attachments.push({ name: file.name || "image", dataUrl: reader.result });
+      renderAttachments();
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+attachBtn.addEventListener("click", () => imageInput.click());
+imageInput.addEventListener("change", () => {
+  addImageFiles(imageInput.files);
+  imageInput.value = ""; // allow re-picking the same file
+});
+// paste an image straight into the composer
+promptInput.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.items ?? [])]
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (files.length) {
+    e.preventDefault();
+    addImageFiles(files);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // composer / session control
 // ---------------------------------------------------------------------------
 function setBusy(busy) {
@@ -370,18 +440,22 @@ function setBusy(busy) {
 
 async function submitPrompt() {
   const prompt = promptInput.value.trim();
-  if (!prompt || state.busy) return;
+  if ((!prompt && state.attachments.length === 0) || state.busy) return;
+  const images = state.attachments.map((a) => a.dataUrl);
+  state.attachments = [];
+  renderAttachments();
   promptInput.value = "";
   autosize();
-  addUserBlock(prompt);
+  addUserBlock(prompt, images);
   setBusy(true);
   try {
     if (state.sessionActive) {
-      await window.harness.sendPrompt(prompt);
+      await window.harness.sendPrompt(prompt, images);
     } else {
       state.sessionActive = true;
       await window.harness.startSession({
         prompt,
+        images,
         cwd: state.cwd,
         model: modelSelect.value,
       });
@@ -400,6 +474,8 @@ async function newSession() {
   state.currentThinking = null;
   state.toolCards.clear();
   state.alwaysAllow.clear();
+  state.attachments = [];
+  renderAttachments();
   setBusy(false);
   usageText.textContent = "";
   chat.querySelectorAll(".block").forEach((b) => b.remove());
@@ -437,6 +513,50 @@ cwdChip.addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// theme toggle (initial state is applied by theme.js before first paint)
+// ---------------------------------------------------------------------------
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const dark = document.documentElement.classList.toggle("dark");
+  localStorage.setItem("harness-theme", dark ? "dark" : "light");
+});
+// while the user hasn't picked explicitly, follow live system theme changes
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+  if (!localStorage.getItem("harness-theme")) {
+    document.documentElement.classList.toggle("dark", e.matches);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// token prompt
+// ---------------------------------------------------------------------------
+function openTokenPrompt() {
+  tokenOverlay.classList.remove("hidden");
+  tokenInput.focus();
+}
+
+function closeTokenPrompt() {
+  tokenOverlay.classList.add("hidden");
+  promptInput.focus();
+}
+
+async function saveToken() {
+  const value = tokenInput.value.trim();
+  if (!value) return;
+  const { hasToken } = await window.harness.setToken(value);
+  tokenInput.value = "";
+  tokenBanner.classList.toggle("hidden", hasToken);
+  closeTokenPrompt();
+}
+
+tokenSaveBtn.addEventListener("click", saveToken);
+tokenSkipBtn.addEventListener("click", closeTokenPrompt);
+tokenBanner.addEventListener("click", openTokenPrompt);
+tokenInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") saveToken();
+  if (e.key === "Escape") closeTokenPrompt();
+});
+
+// ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
 (async () => {
@@ -455,4 +575,5 @@ cwdChip.addEventListener("click", async () => {
   window.harness.onEvent(handleCoreEvent);
   window.harness.onApproval(showApproval);
   promptInput.focus();
+  if (!info.hasToken) openTokenPrompt(); // last so it wins focus
 })();

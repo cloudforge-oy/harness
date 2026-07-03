@@ -5,29 +5,86 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;" />
   <title>Harness</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header id="topbar">
     <div class="topbar-left">
-      <span class="logo">&#10035;</span>
-      <span class="app-title">Harness</span>
+      <span class="logo-badge" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M52 34c6 0 10-4 10-10s-4-10-10-10c0-8-6-14-14-14-6 0-11 3.5-13 8.5C23.5 7 21.5 6 19 6c-5 0-9 4-9 9-.5 0-1-.05-1.5 0C3.5 15.5 0 19.5 0 24.5 0 30 4 34 9 34h43z" fill="rgba(255,255,255,.95)"/>
+          <text x="14" y="30" font-family="monospace" font-weight="bold" font-size="16" fill="#4338ca">&gt;_</text>
+          <text x="38" y="26" font-family="system-ui,sans-serif" font-weight="bold" font-size="14" fill="#7c3aed">1</text>
+        </svg>
+      </span>
+      <span class="app-title wordmark">HARNESS</span>
     </div>
     <div class="topbar-right">
       <button id="cwd-chip" class="chip" title="Change working directory">~</button>
-      <button id="new-session" class="icon-btn" title="New session">+</button>
+      <button id="theme-toggle" class="icon-btn" title="Toggle light/dark theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/>
+          <path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/>
+          <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+        </svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+        </svg>
+      </button>
+      <button id="new-session" class="icon-btn" title="New session">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14"/><path d="M12 5v14"/>
+        </svg>
+      </button>
     </div>
   </header>
 
-  <div id="token-banner" class="banner hidden">
-    CLOUDCODE_TOKEN is not set &mdash; requests to the gateway will fail.
-    Launch with <code>CLOUDCODE_TOKEN=sk-... npm start</code>.
+  <div id="token-banner" class="banner hidden" title="Click to enter a token">
+    CLOUDCODE_TOKEN is not set &mdash; requests to the gateway will fail. Click here to enter one.
+  </div>
+
+  <div id="token-overlay" class="overlay hidden">
+    <div class="token-card">
+      <div class="token-title">
+        <span class="logo-badge" aria-hidden="true">
+          <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M52 34c6 0 10-4 10-10s-4-10-10-10c0-8-6-14-14-14-6 0-11 3.5-13 8.5C23.5 7 21.5 6 19 6c-5 0-9 4-9 9-.5 0-1-.05-1.5 0C3.5 15.5 0 19.5 0 24.5 0 30 4 34 9 34h43z" fill="rgba(255,255,255,.95)"/>
+            <text x="14" y="30" font-family="monospace" font-weight="bold" font-size="16" fill="#4338ca">&gt;_</text>
+            <text x="38" y="26" font-family="system-ui,sans-serif" font-weight="bold" font-size="14" fill="#7c3aed">1</text>
+          </svg>
+        </span>
+        <span class="wordmark">Connect to CLOUDCODE<span class="brand-accent">.ONE</span></span>
+      </div>
+      <p class="token-text">
+        No <code>CLOUDCODE_TOKEN</code> was found in the environment.
+        Paste your gateway token to start using Harness.
+      </p>
+      <input id="token-input" type="password" placeholder="sk-..." spellcheck="false"
+             aria-label="cloudcode.one gateway token" />
+      <div class="token-actions">
+        <button id="token-save" class="primary">Save</button>
+        <button id="token-skip">Not now</button>
+      </div>
+      <div class="token-note">Kept in memory for this run only &mdash; never written to disk.</div>
+    </div>
   </div>
 
   <main id="chat">
     <div id="empty-state">
-      <div class="empty-logo">&#10035;</div>
-      <div class="empty-title">Harness</div>
+      <span class="logo-badge xl" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M52 34c6 0 10-4 10-10s-4-10-10-10c0-8-6-14-14-14-6 0-11 3.5-13 8.5C23.5 7 21.5 6 19 6c-5 0-9 4-9 9-.5 0-1-.05-1.5 0C3.5 15.5 0 19.5 0 24.5 0 30 4 34 9 34h43z" fill="rgba(255,255,255,.95)"/>
+          <text x="14" y="30" font-family="monospace" font-weight="bold" font-size="16" fill="#4338ca">&gt;_</text>
+          <text x="38" y="26" font-family="system-ui,sans-serif" font-weight="bold" font-size="14" fill="#7c3aed">1</text>
+        </svg>
+      </span>
+      <div class="empty-title wordmark">HARNESS</div>
       <div class="empty-hint">Agent sessions on @cline/core via cloudcode.one</div>
       <div class="empty-cwd" id="empty-cwd"></div>
     </div>
@@ -41,13 +98,29 @@
       <button id="stop-btn" class="chip danger">Stop</button>
     </div>
     <div id="composer">
-      <textarea id="prompt-input" rows="1"
+      <div id="attachments" class="hidden"></div>
+      <textarea id="prompt-input" rows="1" aria-label="Message"
                 placeholder="Ask Harness to do something&hellip;"></textarea>
       <div class="composer-bottom">
-        <select id="model-select" title="Model"></select>
+        <input id="image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp"
+               multiple class="hidden" aria-label="Image files" />
+        <button id="attach-btn" class="icon-btn" title="Attach images">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+            <circle cx="9" cy="9" r="2"/>
+            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+          </svg>
+        </button>
+        <select id="model-select" title="Model" aria-label="Model"></select>
         <span class="composer-spacer"></span>
         <span class="composer-hint">&#9166; to send &middot; shift+&#9166; newline</span>
-        <button id="send-btn" title="Send">&#8593;</button>
+        <button id="send-btn" title="Send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>
+          </svg>
+        </button>
       </div>
     </div>
   </footer>
