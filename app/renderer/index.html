@@ -45,8 +45,8 @@
     </div>
   </header>
 
-  <div id="token-banner" class="banner hidden" title="Click to enter a token">
-    CLOUDCODE_TOKEN is not set &mdash; requests to the gateway will fail. Click here to enter one.
+  <div id="token-banner" class="banner hidden" title="Click to connect">
+    Not connected to cloudcode.one &mdash; requests to the gateway will fail. Click here to connect.
   </div>
 
   <div id="token-overlay" class="overlay hidden">
@@ -62,16 +62,26 @@
         <span class="wordmark">Connect to CLOUDCODE<span class="brand-accent">.ONE</span></span>
       </div>
       <p class="token-text">
-        No <code>CLOUDCODE_TOKEN</code> was found in the environment.
-        Paste your gateway token to start using Harness.
+        No <code>CLOUDCODE_TOKEN</code> was found. Approve Harness in the
+        cloudcode.one portal to fetch your API key automatically.
       </p>
+      <button id="portal-connect" class="primary connect-btn">Connect with cloudcode.one</button>
+      <div id="portal-status" class="portal-status hidden">
+        <span class="spinner"></span>
+        <span id="portal-status-text">Waiting for approval in your browser&hellip;</span>
+        <button id="portal-cancel" class="link-btn">Cancel</button>
+      </div>
+      <div id="portal-error" class="portal-error hidden"></div>
+      <button id="portal-dashboard" class="hidden">Open dashboard</button>
+      <div class="token-divider"><span>or paste a token manually</span></div>
       <input id="token-input" type="password" placeholder="sk-..." spellcheck="false"
              aria-label="cloudcode.one gateway token" />
       <div class="token-actions">
-        <button id="token-save" class="primary">Save</button>
+        <button id="token-save">Save</button>
         <button id="token-skip">Not now</button>
       </div>
-      <div class="token-note">Kept in memory for this run only &mdash; never written to disk.</div>
+      <div class="token-note">Keys fetched from the portal are stored encrypted via your OS keychain.
+        Pasted tokens are kept in memory for this run only &mdash; never written to disk.</div>
     </div>
   </div>
 

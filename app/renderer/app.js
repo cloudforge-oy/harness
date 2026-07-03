@@ -22,6 +22,11 @@ const tokenOverlay = document.getElementById("token-overlay");
 const tokenInput = document.getElementById("token-input");
 const tokenSaveBtn = document.getElementById("token-save");
 const tokenSkipBtn = document.getElementById("token-skip");
+const portalConnectBtn = document.getElementById("portal-connect");
+const portalStatus = document.getElementById("portal-status");
+const portalCancelBtn = document.getElementById("portal-cancel");
+const portalError = document.getElementById("portal-error");
+const portalDashboardBtn = document.getElementById("portal-dashboard");
 
 const state = {
   cwd: "",
@@ -527,16 +532,52 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e)
 });
 
 // ---------------------------------------------------------------------------
-// token prompt
+// connect prompt — portal flow first, manual token as fallback
 // ---------------------------------------------------------------------------
+let portalBusy = false;
+
 function openTokenPrompt() {
   tokenOverlay.classList.remove("hidden");
-  tokenInput.focus();
+  portalConnectBtn.focus();
 }
 
 function closeTokenPrompt() {
+  if (portalBusy) window.harness.portalCancel();
   tokenOverlay.classList.add("hidden");
   promptInput.focus();
+}
+
+function setPortalBusy(busy) {
+  portalBusy = busy;
+  portalConnectBtn.disabled = busy;
+  portalStatus.classList.toggle("hidden", !busy);
+  if (busy) {
+    portalError.classList.add("hidden");
+    portalDashboardBtn.classList.add("hidden");
+  }
+}
+
+const PORTAL_ERRORS = {
+  access_denied: "The request was denied in the browser. Try again when you're ready.",
+  no_active_key: "No active API key on your account — subscribe or buy credits on the dashboard, then retry.",
+  timeout: "Timed out waiting for approval (codes expire after 5 minutes). Try again.",
+  network_error: "Couldn't reach the portal — check your connection and try again.",
+};
+
+async function portalConnect() {
+  if (portalBusy) return;
+  setPortalBusy(true);
+  const res = await window.harness.portalConnect();
+  setPortalBusy(false);
+  if (res.ok) {
+    tokenBanner.classList.add("hidden");
+    closeTokenPrompt();
+    return;
+  }
+  if (res.error === "cancelled") return; // user backed out; no error to show
+  portalError.textContent = PORTAL_ERRORS[res.error] ?? res.message ?? "Something went wrong — try again.";
+  portalError.classList.remove("hidden");
+  portalDashboardBtn.classList.toggle("hidden", res.error !== "no_active_key");
 }
 
 async function saveToken() {
@@ -548,6 +589,9 @@ async function saveToken() {
   closeTokenPrompt();
 }
 
+portalConnectBtn.addEventListener("click", portalConnect);
+portalCancelBtn.addEventListener("click", () => window.harness.portalCancel());
+portalDashboardBtn.addEventListener("click", () => window.harness.openDashboard());
 tokenSaveBtn.addEventListener("click", saveToken);
 tokenSkipBtn.addEventListener("click", closeTokenPrompt);
 tokenBanner.addEventListener("click", openTokenPrompt);

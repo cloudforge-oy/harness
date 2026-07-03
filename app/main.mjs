@@ -7,10 +7,12 @@
  *   - session:event                                  (main -> renderer stream)
  *   - approval:request / approval:respond            (tool-approval round trip)
  */
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { register } from "tsx/esm/api";
+import { cancelPortalAuth, fetchApiKeyFromPortal } from "./portal-auth.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 register();
 
 const MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"];
+const PORTAL_BASE = (process.env.CLOUDCODE_PORTAL_URL ?? "https://cloudcode.one").replace(/\/+$/, "");
 const DEFAULT_SYSTEM_PROMPT =
   "You are Harness, a coding agent running inside a desktop app. " +
   "You operate on the user's working directory with file and shell tools. " +
@@ -48,6 +51,31 @@ async function closeSession() {
   const s = session;
   session = null;
   await s.close().catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Portal key storage — keys fetched from the portal persist across runs via
+// safeStorage (OS keychain backed). Manually pasted tokens are NOT persisted.
+// ---------------------------------------------------------------------------
+const keyFilePath = () => path.join(app.getPath("userData"), "cloudcode-key.bin");
+
+function loadStoredKey() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    return safeStorage.decryptString(fs.readFileSync(keyFilePath()));
+  } catch {
+    return null; // no file yet, or keychain unavailable/changed
+  }
+}
+
+function storeKey(key) {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return false;
+    fs.writeFileSync(keyFilePath(), safeStorage.encryptString(key), { mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // HARNESS_THEME=dark|light forces the theme (useful with HARNESS_SCREENSHOT).
@@ -98,6 +126,7 @@ ipcMain.handle("app:info", () => ({
   models: MODELS,
   defaultModel: process.env.CLOUDCODE_MODEL ?? MODELS[0],
   baseUrl: process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudcode.one/v1",
+  portalBase: PORTAL_BASE,
   hasToken: Boolean(process.env.CLOUDCODE_TOKEN),
   versions: { electron: process.versions.electron, node: process.versions.node },
 }));
@@ -107,6 +136,27 @@ ipcMain.handle("app:set-token", (_e, token) => {
   const value = String(token ?? "").trim();
   if (value) process.env.CLOUDCODE_TOKEN = value;
   return { hasToken: Boolean(process.env.CLOUDCODE_TOKEN) };
+});
+
+// Browser-based key retrieval; resolves once the user approves in the portal.
+// Returns a structured result so the renderer can render each failure mode.
+ipcMain.handle("app:portal-connect", async () => {
+  try {
+    const key = await fetchApiKeyFromPortal({
+      portalBase: PORTAL_BASE,
+      openExternal: (url) => shell.openExternal(url),
+    });
+    process.env.CLOUDCODE_TOKEN = key;
+    return { ok: true, hasToken: true, stored: storeKey(key) };
+  } catch (err) {
+    return { ok: false, error: err.code ?? "unknown", message: err.message };
+  }
+});
+
+ipcMain.on("app:portal-cancel", () => cancelPortalAuth("Cancelled by user"));
+
+ipcMain.on("app:open-dashboard", () => {
+  shell.openExternal(`${PORTAL_BASE}/dashboard`);
 });
 
 ipcMain.handle("app:pick-folder", async () => {
@@ -184,7 +234,14 @@ async function replayDemo() {
 // ---------------------------------------------------------------------------
 // NOTE: must stay a .then() chain — Electron emits "ready" only after the main
 // module finishes evaluating, so a top-level `await app.whenReady()` deadlocks.
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // safeStorage needs the app to be ready; env still wins over the stored key.
+  if (!process.env.CLOUDCODE_TOKEN) {
+    const stored = loadStoredKey();
+    if (stored) process.env.CLOUDCODE_TOKEN = stored;
+  }
+  createWindow();
+});
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -196,5 +253,6 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   denyAllPending("App quitting");
+  cancelPortalAuth("App quitting");
   if (session) session.close().catch(() => {});
 });

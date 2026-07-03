@@ -10,6 +10,7 @@ chat UI.
 - `cloudcode-smoke.ts` — SDK capability probe + live gateway smoke test
 - `app/` — Electron app
   - `main.mjs` — main process; hosts the agent session and bridges it over IPC
+  - `portal-auth.mjs` — PKCE loopback flow that fetches the API key from the portal
   - `preload.cjs` — context-isolated bridge (`window.harness`)
   - `renderer/` — chat UI (streaming text, thinking, tool cards, permission prompts,
     image attachments via the composer button or paste)
@@ -22,11 +23,23 @@ CLOUDCODE_TOKEN=sk-... npm start
 ```
 
 Optional env: `CLOUDCODE_BASE_URL` (default `https://api.cloudcode.one/v1`),
-`CLOUDCODE_MODEL` (default `deepseek-v4-pro`).
+`CLOUDCODE_MODEL` (default `deepseek-v4-pro`), `CLOUDCODE_PORTAL_URL`
+(default `https://cloudcode.one`).
 
-If `CLOUDCODE_TOKEN` isn't set, the app prompts for it at startup (the warning
-banner reopens the prompt). A token entered this way is kept in the app's memory
-for that run only — it is never written to disk.
+If `CLOUDCODE_TOKEN` isn't set, the app offers to fetch a key from the portal at
+startup (the warning banner reopens the prompt):
+
+1. **Connect with cloudcode.one** (primary) — opens the portal consent page in the
+   system browser (PKCE + loopback redirect). After you approve, the app exchanges
+   the one-time code for your `sk-…` key and stores it encrypted with Electron's
+   `safeStorage` (OS keychain), so it survives restarts. If you deny, or have no
+   active key (not subscribed / out of credits), the dialog explains and offers the
+   dashboard; authorization codes are single-use and expire after 5 minutes, so a
+   retry restarts the flow.
+2. **Paste a token manually** — kept in the app's memory for that run only, never
+   written to disk.
+
+A `CLOUDCODE_TOKEN` in the environment always wins over a stored key.
 
 Note: if launching from a shell where `ELECTRON_RUN_AS_NODE` is set (e.g. a VS Code
 terminal), unset it first: `env -u ELECTRON_RUN_AS_NODE npm start`.

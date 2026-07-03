@@ -10,6 +10,9 @@ const subscribe = (channel, cb) => {
 contextBridge.exposeInMainWorld("harness", {
   info: () => ipcRenderer.invoke("app:info"),
   setToken: (token) => ipcRenderer.invoke("app:set-token", token),
+  portalConnect: () => ipcRenderer.invoke("app:portal-connect"),
+  portalCancel: () => ipcRenderer.send("app:portal-cancel"),
+  openDashboard: () => ipcRenderer.send("app:open-dashboard"),
   pickFolder: () => ipcRenderer.invoke("app:pick-folder"),
   startSession: (args) => ipcRenderer.invoke("session:start", args),
   sendPrompt: (prompt, images) => ipcRenderer.invoke("session:send", { prompt, images }),
