@@ -2,17 +2,78 @@
   "name": "harness",
   "productName": "Harness",
   "version": "0.1.0",
+  "description": "Agent harness on @cline/core with a Claude-Code-style desktop UI, talking to the cloudcode.one gateway.",
+  "author": "CloudForge Oy <hello@cloudcode.one>",
+  "homepage": "https://cloudcode.one",
   "type": "module",
   "main": "app/main.mjs",
   "scripts": {
     "start": "electron .",
-    "smoke": "tsx cloudcode-smoke.ts"
+    "smoke": "tsx cloudcode-smoke.ts",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux deb",
+    "dist:win": "electron-builder --win nsis"
   },
   "dependencies": {
     "@cline/core": "^0.0.54",
     "tsx": "^4.22.4"
   },
   "devDependencies": {
-    "electron": "^43.0.0"
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "one.cloudcode.harness",
+    "productName": "Harness",
+    "copyright": "Copyright © 2026 CloudForge Oy",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "app/**/*",
+      "cloudcode-harness.ts",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [],
+    "asar": false,
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "category": "Development",
+      "maintainer": "CloudForge Oy <hello@cloudcode.one>",
+      "synopsis": "Agent harness desktop app for cloudcode.one",
+      "description": "Claude-Code-style desktop chat for running @cline/core agent sessions against the cloudcode.one gateway.",
+      "icon": "build/icon.png"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libsecret-1-0"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Harness"
+    }
   }
 }
