@@ -1,8 +1,8 @@
 /**
  * Electron main process for the Harness desktop app.
  *
- * Hosts the @cline/core agent session (via cloudcode-harness.ts, loaded with
- * tsx's ESM API so the TS source is used as-is) and bridges it to the renderer:
+ * Hosts the @cline/core agent session (from cloudcode-harness.ts) and bridges
+ * it to the renderer:
  *   - session:start / session:send / session:stop   (invoke)
  *   - session:event                                  (main -> renderer stream)
  *   - approval:request / approval:respond            (tool-approval round trip)
@@ -11,14 +11,9 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { register } from "tsx/esm/api";
 import { cancelPortalAuth, fetchApiKeyFromPortal } from "./portal-auth.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// tsx hooks the ESM loader so cloudcode-harness.ts can be imported as-is.
-// (tsImport()'s namespaced variant breaks on node: builtins with tsx 4.22 / Node 24.)
-register();
 
 const MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"];
 const PORTAL_BASE = (process.env.CLOUDCODE_PORTAL_URL ?? "https://cloudcode.one").replace(/\/+$/, "");
@@ -33,8 +28,21 @@ let harnessPromise = null;
 let approvalSeq = 0;
 const pendingApprovals = new Map(); // id -> resolve({ approved, reason })
 
-const getHarness = () =>
-  (harnessPromise ??= import(pathToFileURL(path.join(__dirname, "..", "cloudcode-harness.ts")).href));
+// A packaged app loads the harness precompiled to plain JS (see
+// scripts/build-harness.mjs); dev compiles the TS on the fly with tsx. This
+// keeps tsx/esbuild — which ship platform-specific native binaries — out of
+// the packaged app, so a build made on one OS runs on another.
+const getHarness = () => (harnessPromise ??= loadHarness());
+
+async function loadHarness() {
+  const base = path.join(__dirname, "..");
+  if (app.isPackaged) {
+    return import(pathToFileURL(path.join(base, "cloudcode-harness.js")).href);
+  }
+  const { register } = await import("tsx/esm/api");
+  register();
+  return import(pathToFileURL(path.join(base, "cloudcode-harness.ts")).href);
+}
 
 const toRenderer = (channel, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);

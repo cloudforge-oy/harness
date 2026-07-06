@@ -56,6 +56,28 @@ sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
 (or, dev-only: `ELECTRON_DISABLE_SANDBOX=1 npm start`).
 
+## Packaging
+
+```bash
+npm run dist:linux   # dist/harness_<version>_amd64.deb
+npm run dist:win     # dist/Harness-<version>-win.zip + dist/Harness-Setup-<version>.exe
+```
+
+Both first precompile `cloudcode-harness.ts` to plain JS (`npm run build:harness`) so
+the packaged app doesn't need tsx/esbuild — esbuild ships platform-specific native
+binaries, so bundling it would break cross-platform packaging (a Windows build made
+on Linux would carry the Linux binary and fail at runtime). Dev (`npm start`) still
+compiles the TS on the fly with tsx.
+
+The Windows NSIS installer is compiled by `scripts/build-win-installer.mjs` from
+`build/installer.nsi` using the native (non-wine) makensis that electron-builder
+caches under `~/.cache/electron-builder/`, so it builds fine on Linux. It's a
+per-user install (no UAC) to `%LOCALAPPDATA%\Programs\Harness` with desktop/start-menu
+shortcuts and an Add-or-Remove-Programs entry; the uninstaller is written at install
+time on the user's machine (which is why wine isn't needed — electron-builder's own
+nsis target pre-generates the uninstaller under wine only so it can code-sign it,
+and these builds are unsigned).
+
 ## UI development without a token
 
 `HARNESS_DEMO=1 npm start` replays a canned event stream (thinking, streaming text,

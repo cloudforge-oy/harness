@@ -10,17 +10,19 @@
   "scripts": {
     "start": "electron .",
     "smoke": "tsx cloudcode-smoke.ts",
-    "dist": "electron-builder",
-    "dist:linux": "electron-builder --linux deb",
-    "dist:win": "electron-builder --win nsis"
+    "build:harness": "node scripts/build-harness.mjs",
+    "dist": "npm run build:harness && electron-builder",
+    "dist:linux": "npm run build:harness && electron-builder --linux deb",
+    "dist:win": "npm run build:harness && electron-builder --win zip && node scripts/build-win-installer.mjs"
   },
   "dependencies": {
-    "@cline/core": "^0.0.54",
-    "tsx": "^4.22.4"
+    "@cline/core": "^0.0.54"
   },
   "devDependencies": {
     "electron": "^43.0.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "0.28.1",
+    "tsx": "^4.22.4"
   },
   "build": {
     "appId": "one.cloudcode.harness",
@@ -32,11 +34,10 @@
     },
     "files": [
       "app/**/*",
-      "cloudcode-harness.ts",
+      "cloudcode-harness.js",
       "package.json",
       "!**/*.map"
     ],
-    "extraResources": [],
     "asar": false,
     "linux": {
       "target": [
@@ -62,18 +63,9 @@
     },
     "win": {
       "target": [
-        "nsis",
         "zip"
       ],
       "icon": "build/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Harness"
     }
   }
 }
