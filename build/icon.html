@@ -1,7 +1,20 @@
 <!DOCTYPE html>
-<html>
-<head><meta charset="utf-8" />
+<html lang="en">
+<head><meta charset="utf-8" /><title>Harness icon</title>
 <style>html,body{margin:0;padding:0;background:transparent;width:1024px;height:1024px;overflow:hidden;}</style>
+<script>
+  // ?size=N renders the icon at N px (SVG art, so every size stays crisp).
+  // Default 1024. Used by scripts/build-icons.mjs.
+  addEventListener("DOMContentLoaded", () => {
+    const size = Number(new URLSearchParams(location.search).get("size")) || 1024;
+    for (const el of [document.documentElement, document.body]) {
+      el.style.width = el.style.height = size + "px";
+    }
+    const svg = document.querySelector("svg");
+    svg.setAttribute("width", size);
+    svg.setAttribute("height", size);
+  });
+</script>
 </head>
 <body>
   <svg width="1024" height="1024" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">

@@ -7,6 +7,7 @@
   "homepage": "https://cloudcode.one",
   "type": "module",
   "main": "app/main.mjs",
+  "desktopName": "harness.desktop",
   "scripts": {
     "start": "electron .",
     "smoke": "tsx cloudcode-smoke.ts",
@@ -47,7 +48,8 @@
       "maintainer": "CloudForge Oy <hello@cloudcode.one>",
       "synopsis": "Agent harness desktop app for cloudcode.one",
       "description": "Claude-Code-style desktop chat for running @cline/core agent sessions against the cloudcode.one gateway.",
-      "icon": "build/icon.png"
+      "icon": "build/icons",
+      "syncDesktopName": true
     },
     "deb": {
       "depends": [
