@@ -11,13 +11,15 @@
   "scripts": {
     "start": "electron .",
     "smoke": "tsx cloudcode-smoke.ts",
+    "postinstall": "node scripts/patch-cline-agents.mjs",
     "build:harness": "node scripts/build-harness.mjs",
     "dist": "npm run build:harness && electron-builder",
     "dist:linux": "npm run build:harness && electron-builder --linux deb",
     "dist:win": "npm run build:harness && electron-builder --win zip && node scripts/build-win-installer.mjs"
   },
   "dependencies": {
-    "@cline/core": "^0.0.54"
+    "@cline/core": "^0.0.54",
+    "jsonrepair": "^3.15.0"
   },
   "devDependencies": {
     "electron": "^43.0.0",

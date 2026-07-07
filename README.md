@@ -87,6 +87,19 @@ can be exercised offline. `HARNESS_SCREENSHOT=/path.png` captures the window and
 the topbar sun/moon button picks one explicitly (persisted in localStorage);
 `HARNESS_THEME=dark|light` overrides the system default at launch.
 
+## Lenient tool-argument parsing (postinstall patch)
+
+`@cline/agents` strict-parses the JSON tool arguments streamed from the model and
+fails the tool call when they don't parse. Weaker models (deepseek-v4-flash)
+routinely emit large `editor` payloads with unescaped quotes/newlines, which made
+the editor tool unusable. There's no hook for the raw argument text, so
+`scripts/patch-cline-agents.mjs` (run automatically on `npm install`) patches the
+parser in `node_modules/@cline/agents` to try [jsonrepair](https://www.npmjs.com/package/jsonrepair)
+before giving up. Valid JSON still takes the strict path; unrecoverable garbage
+still fails with the original error. The patch is idempotent and aborts the
+install loudly if a `@cline` version bump changes the parser (re-verify the
+anchor in the script against the new version, then update it).
+
 ## Smoke test
 
 ```bash
