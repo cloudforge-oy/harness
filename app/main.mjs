@@ -15,7 +15,7 @@ import { cancelPortalAuth, fetchApiKeyFromPortal } from "./portal-auth.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"];
+const MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "glm-4.7-flash"];
 const PORTAL_BASE = (process.env.CLOUDCODE_PORTAL_URL ?? "https://cloudcode.one").replace(/\/+$/, "");
 const DEFAULT_SYSTEM_PROMPT =
   "You are Harness, a coding agent running inside a desktop app. " +
