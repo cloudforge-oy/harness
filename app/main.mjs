@@ -219,6 +219,12 @@ ipcMain.handle("app:pick-folder", async () => {
 
 ipcMain.handle("session:start", async (_e, args) => {
   await closeSession();
+  // Parts of @cline/core (prompt environment context, relative-path resolution
+  // in some executors) use process.cwd() instead of the session cwd — align
+  // them by chdir'ing to the folder the user picked.
+  if (args.cwd) {
+    try { process.chdir(args.cwd); } catch { /* folder gone — executors still get args.cwd */ }
+  }
   const [harness, catalog] = await Promise.all([getHarness(), loadCatalog()]);
   session = await harness.runAgentSession({
     prompt: args.prompt,
