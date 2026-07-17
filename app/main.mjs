@@ -15,8 +15,47 @@ import { cancelPortalAuth, fetchApiKeyFromPortal } from "./portal-auth.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "glm-4.7-flash"];
 const PORTAL_BASE = (process.env.CLOUDCODE_PORTAL_URL ?? "https://cloudcode.one").replace(/\/+$/, "");
+
+// Bundled snapshot of https://cloudcode.one/models.json, used until the live
+// fetch succeeds (offline, portal down). Prices are USD per 1M tokens.
+const FALLBACK_CATALOG = {
+  currency: "USD",
+  unit: "per 1M tokens",
+  image_surcharge_usd: 0.02,
+  models: [
+    { id: "deepseek-v4-pro", blurb: "Main coding model · 1M context", input: 0.87, output: 1.74, cached_input: null, free: false, vision: false },
+    { id: "deepseek-v4-flash", blurb: "Fast subagents · haiku tier", input: 0.28, output: 0.56, cached_input: null, free: false, vision: false },
+    { id: "glm-5v-turbo", blurb: "Vision · $0.48/M cached input", input: 2.4, output: 8.0, cached_input: 0.48, free: false, vision: true },
+    { id: "glm-5.2", blurb: "Flagship coding agent · 1M context · $0.39/M cached input", input: 2.1, output: 6.6, cached_input: 0.39, free: false, vision: false },
+    { id: "glm-4.7-flash", blurb: "Fast · free tier", input: 0, output: 0, cached_input: null, free: true, vision: false },
+    { id: "glm-4.6v-flash", blurb: "Vision · free tier", input: 0, output: 0, cached_input: null, free: true, vision: true },
+  ],
+};
+
+let liveCatalog = null;   // last successful models.json fetch
+let catalogFetch = null;  // in-flight fetch, so concurrent callers share it
+
+async function loadCatalog() {
+  if (liveCatalog) return liveCatalog;
+  catalogFetch ??= (async () => {
+    try {
+      const res = await fetch(`${PORTAL_BASE}/models.json`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data?.models) || !data.models.every((m) => typeof m?.id === "string")) {
+        throw new Error("malformed models.json");
+      }
+      liveCatalog = data;
+    } catch (err) {
+      console.warn(`models.json fetch failed (${err.message}); using bundled catalog`);
+    } finally {
+      catalogFetch = null; // a failed fetch retries on the next call
+    }
+  })();
+  await catalogFetch;
+  return liveCatalog ?? FALLBACK_CATALOG;
+}
 const DEFAULT_SYSTEM_PROMPT =
   "You are Harness, a coding agent running inside a desktop app. " +
   "You operate on the user's working directory with file and shell tools. " +
@@ -129,15 +168,21 @@ function createWindow() {
 // ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
-ipcMain.handle("app:info", () => ({
-  cwd: process.cwd(),
-  models: MODELS,
-  defaultModel: process.env.CLOUDCODE_MODEL ?? MODELS[0],
-  baseUrl: process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudcode.one/v1",
-  portalBase: PORTAL_BASE,
-  hasToken: Boolean(process.env.CLOUDCODE_TOKEN),
-  versions: { electron: process.versions.electron, node: process.versions.node },
-}));
+ipcMain.handle("app:info", async () => {
+  const catalog = await loadCatalog();
+  return {
+    cwd: process.cwd(),
+    models: catalog.models,
+    defaultModel: process.env.CLOUDCODE_MODEL ?? catalog.models[0].id,
+    currency: catalog.currency ?? "USD",
+    unit: catalog.unit ?? "per 1M tokens",
+    imageSurchargeUsd: catalog.image_surcharge_usd ?? 0,
+    baseUrl: process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudcode.one/v1",
+    portalBase: PORTAL_BASE,
+    hasToken: Boolean(process.env.CLOUDCODE_TOKEN),
+    versions: { electron: process.versions.electron, node: process.versions.node },
+  };
+});
 
 // Token entered in the UI lives in this process's env only — never written to disk.
 ipcMain.handle("app:set-token", (_e, token) => {
@@ -174,12 +219,13 @@ ipcMain.handle("app:pick-folder", async () => {
 
 ipcMain.handle("session:start", async (_e, args) => {
   await closeSession();
-  const harness = await getHarness();
+  const [harness, catalog] = await Promise.all([getHarness(), loadCatalog()]);
   session = await harness.runAgentSession({
     prompt: args.prompt,
     images: args.images,
     cwd: args.cwd || process.cwd(),
     model: args.model,
+    models: catalog.models,
     systemPrompt: args.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     onEvent: (event) => toRenderer("session:event", event),
     onApprovalRequest: (req) =>
@@ -248,6 +294,7 @@ app.whenReady().then(() => {
     const stored = loadStoredKey();
     if (stored) process.env.CLOUDCODE_TOKEN = stored;
   }
+  loadCatalog(); // warm the model catalog so app:info doesn't wait on the network
   createWindow();
 });
 

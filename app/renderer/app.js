@@ -37,6 +37,10 @@ const state = {
   toolCards: new Map(),   // toolCallId -> card refs
   alwaysAllow: new Set(), // tool names auto-approved this session
   attachments: [],        // { name, dataUrl } pending images for the next prompt
+  models: new Map(),      // id -> models.json entry (prices in USD per 1M tokens)
+  imageSurchargeUsd: 0,   // gateway per-image charge from models.json
+  imagesSent: 0,          // images sent this session (for the surcharge)
+  sessionModel: null,     // model the active session was started with
 };
 
 // ---------------------------------------------------------------------------
@@ -312,6 +316,42 @@ function showApproval(req) {
   no.addEventListener("click", () => resolve(false));
 }
 
+function modelTooltip(m) {
+  const lines = [];
+  if (m.blurb) lines.push(m.blurb);
+  if (m.free) {
+    lines.push("Free");
+  } else {
+    let price = `$${m.input}/M input · $${m.output}/M output`;
+    if (m.cached_input != null) price += ` · $${m.cached_input}/M cached input`;
+    lines.push(price);
+  }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// session cost — token prices come from models.json (per 1M tokens); the
+// gateway also charges a flat surcharge per attached image
+// ---------------------------------------------------------------------------
+function sessionCost(e, inTok, outTok) {
+  const model = state.models.get(state.sessionModel ?? modelSelect.value);
+  // Core prices usage events from knownModels (incl. cached-input discounts);
+  // fall back to a flat-rate estimate from the totals when it reports nothing.
+  let base = typeof e.totalCost === "number" && e.totalCost > 0 ? e.totalCost : null;
+  if (base === null && model) base = (inTok * model.input + outTok * model.output) / 1e6;
+  if (base === null) return null; // no pricing available for this model
+  return base + state.imagesSent * state.imageSurchargeUsd;
+}
+
+function renderUsage(e) {
+  const inTok = e.totalInputTokens ?? e.inputTokens ?? 0;
+  const outTok = e.totalOutputTokens ?? e.outputTokens ?? 0;
+  const parts = [`↑${inTok} ↓${outTok} tokens`];
+  const cost = sessionCost(e, inTok, outTok);
+  if (cost !== null) parts.push(cost === 0 ? "free" : `$${cost.toFixed(4)} session`);
+  usageText.textContent = parts.join(" · ");
+}
+
 // ---------------------------------------------------------------------------
 // core event stream
 // ---------------------------------------------------------------------------
@@ -331,9 +371,7 @@ function handleAgentEvent(e) {
       else if (e.contentType === "tool") finishToolCard(toolCardFor(e.toolCallId), e);
       break;
     case "usage":
-      usageText.textContent =
-        `↑${e.totalInputTokens ?? e.inputTokens ?? 0} ↓${e.totalOutputTokens ?? e.outputTokens ?? 0} tokens` +
-        (e.totalCost ? ` · $${e.totalCost.toFixed(4)}` : "");
+      renderUsage(e);
       setBusy(state.busy); // re-evaluate row visibility
       break;
     case "notice":
@@ -452,12 +490,14 @@ async function submitPrompt() {
   promptInput.value = "";
   autosize();
   addUserBlock(prompt, images);
+  state.imagesSent += images.length;
   setBusy(true);
   try {
     if (state.sessionActive) {
       await window.harness.sendPrompt(prompt, images);
     } else {
       state.sessionActive = true;
+      state.sessionModel = modelSelect.value;
       await window.harness.startSession({
         prompt,
         images,
@@ -480,6 +520,8 @@ async function newSession() {
   state.toolCards.clear();
   state.alwaysAllow.clear();
   state.attachments = [];
+  state.imagesSent = 0;
+  state.sessionModel = null;
   renderAttachments();
   setBusy(false);
   usageText.textContent = "";
@@ -609,11 +651,14 @@ tokenInput.addEventListener("keydown", (e) => {
   cwdChip.textContent = info.cwd;
   document.getElementById("empty-cwd").textContent = info.cwd;
   tokenBanner.classList.toggle("hidden", info.hasToken);
+  state.imageSurchargeUsd = info.imageSurchargeUsd ?? 0;
   for (const m of info.models) {
+    state.models.set(m.id, m);
     const opt = document.createElement("option");
-    opt.value = m;
-    opt.textContent = m;
-    if (m === info.defaultModel) opt.selected = true;
+    opt.value = m.id;
+    opt.textContent = m.free ? `${m.id} · free` : m.id;
+    opt.title = modelTooltip(m);
+    if (m.id === info.defaultModel) opt.selected = true;
     modelSelect.appendChild(opt);
   }
   window.harness.onEvent(handleCoreEvent);

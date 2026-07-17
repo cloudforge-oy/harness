@@ -49,10 +49,42 @@ import type {
 const cloudcodeBaseUrl = () => process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudcode.one/v1";
 const cloudcodeToken = () => process.env.CLOUDCODE_TOKEN ?? "";
 
-const KNOWN_MODELS = {
+/** One entry of https://cloudcode.one/models.json (prices are USD per 1M tokens). */
+export interface CloudcodeModel {
+  id: string;
+  blurb?: string;
+  input: number;
+  output: number;
+  cached_input?: number | null;
+  free?: boolean;
+  vision?: boolean;
+}
+
+const FALLBACK_KNOWN_MODELS = {
   "deepseek-v4-pro":   { maxTokens: 8192, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
   "deepseek-v4-flash": { maxTokens: 8192, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
 } as unknown as CoreSessionConfig["knownModels"];
+
+/** Catalog entries -> core ModelInfo, so core's usage events carry a real
+ *  totalCost. supportsImages stays true even for vision:false models — the
+ *  gateway accepts images on any model and reroutes them to a vision variant;
+ *  the vision flag is a UI concern. */
+function toKnownModels(models?: CloudcodeModel[]): CoreSessionConfig["knownModels"] {
+  if (!models?.length) return FALLBACK_KNOWN_MODELS;
+  const known: Record<string, unknown> = {};
+  for (const m of models) {
+    known[m.id] = {
+      maxTokens: 8192,
+      contextWindow: 128_000,
+      supportsImages: true,
+      supportsPromptCache: m.cached_input != null,
+      inputPrice: m.input,
+      outputPrice: m.output,
+      ...(m.cached_input != null ? { cacheReadsPrice: m.cached_input } : {}),
+    };
+  }
+  return known as unknown as CoreSessionConfig["knownModels"];
+}
 
 // ===========================================================================
 // 2. TOOL APPROVAL
@@ -155,13 +187,14 @@ function cloudcodeConfig(opts: {
   cwd: string;
   systemPrompt: string;
   model?: string;
+  models?: CloudcodeModel[];
 }): CoreSessionConfig {
   return {
     providerId: "anthropic",
     modelId: opts.model ?? "deepseek-v4-pro",
     apiKey: cloudcodeToken(),
     baseUrl: cloudcodeBaseUrl(),           // <-- your gateway
-    knownModels: KNOWN_MODELS,
+    knownModels: toKnownModels(opts.models),
     systemPrompt: opts.systemPrompt,
     cwd: opts.cwd,
     mode: "act",
@@ -183,6 +216,9 @@ export interface RunSessionArgs {
   cwd: string;
   systemPrompt: string;
   model?: string;
+  /** Model catalog fetched from https://cloudcode.one/models.json; feeds
+   *  knownModels so core prices usage events. Omitted -> fallback entries. */
+  models?: CloudcodeModel[];
   onEvent: (event: CoreSessionEvent) => void;   // forward to your websocket/SSE
   onApprovalRequest: ApprovalResolver;          // your approve/deny UI resolves this
 }
@@ -192,7 +228,7 @@ export async function runAgentSession(args: RunSessionArgs) {
 
   const unsubscribe = cline.subscribe((event: CoreSessionEvent) => args.onEvent(event));
   const { sessionId } = await cline.start({
-    config: cloudcodeConfig({ cwd: args.cwd, systemPrompt: args.systemPrompt, model: args.model }),
+    config: cloudcodeConfig({ cwd: args.cwd, systemPrompt: args.systemPrompt, model: args.model, models: args.models }),
     prompt: args.prompt,
     userImages: args.images,
     interactive: true,
