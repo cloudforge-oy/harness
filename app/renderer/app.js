@@ -350,7 +350,7 @@ function renderUsage(e) {
     parts.push(`$${state.balance.balance.toFixed(2)} balance · $${state.balance.used.toFixed(2)} used`);
   }
   usageText.textContent = parts.join(" · ");
-  statusRow.classList.toggle("hidden", !state.busy && !usageText.textContent);
+  setBusy(state.busy); // re-evaluate row visibility incl. spinner/stop
 }
 
 // ---------------------------------------------------------------------------
