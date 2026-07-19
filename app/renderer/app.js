@@ -38,8 +38,8 @@ const state = {
   alwaysAllow: new Set(), // tool names auto-approved this session
   attachments: [],        // { name, dataUrl } pending images for the next prompt
   models: new Map(),      // id -> models.json entry (prices in USD per 1M tokens)
-  imageSurchargeUsd: 0,   // gateway per-image charge from models.json
-  imagesSent: 0,          // images sent this session (for the surcharge)
+  usage: null,            // last usage event (token totals)
+  balance: null,          // { currency, balance, used } from /api/balance
   sessionModel: null,     // model the active session was started with
 };
 
@@ -330,26 +330,27 @@ function modelTooltip(m) {
 }
 
 // ---------------------------------------------------------------------------
-// session cost — token prices come from models.json (per 1M tokens); the
-// gateway also charges a flat surcharge per attached image
+// usage line — token totals from the session plus the account balance/used
+// from the portal's /api/balance (refetched after every usage event)
 // ---------------------------------------------------------------------------
-function sessionCost(e, inTok, outTok) {
-  const model = state.models.get(state.sessionModel ?? modelSelect.value);
-  // Core prices usage events from knownModels (incl. cached-input discounts);
-  // fall back to a flat-rate estimate from the totals when it reports nothing.
-  let base = typeof e.totalCost === "number" && e.totalCost > 0 ? e.totalCost : null;
-  if (base === null && model) base = (inTok * model.input + outTok * model.output) / 1e6;
-  if (base === null) return null; // no pricing available for this model
-  return base + state.imagesSent * state.imageSurchargeUsd;
+async function refreshBalance() {
+  state.balance = await window.harness.balance();
+  renderUsage();
 }
 
 function renderUsage(e) {
-  const inTok = e.totalInputTokens ?? e.inputTokens ?? 0;
-  const outTok = e.totalOutputTokens ?? e.outputTokens ?? 0;
-  const parts = [`↑${inTok} ↓${outTok} tokens`];
-  const cost = sessionCost(e, inTok, outTok);
-  if (cost !== null) parts.push(cost === 0 ? "free" : `$${cost.toFixed(4)} session`);
+  if (e) state.usage = e;
+  const parts = [];
+  if (state.usage) {
+    const inTok = state.usage.totalInputTokens ?? state.usage.inputTokens ?? 0;
+    const outTok = state.usage.totalOutputTokens ?? state.usage.outputTokens ?? 0;
+    parts.push(`↑${inTok} ↓${outTok} tokens`);
+  }
+  if (state.balance) {
+    parts.push(`$${state.balance.balance.toFixed(2)} balance · $${state.balance.used.toFixed(2)} used`);
+  }
   usageText.textContent = parts.join(" · ");
+  statusRow.classList.toggle("hidden", !state.busy && !usageText.textContent);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +373,7 @@ function handleAgentEvent(e) {
       break;
     case "usage":
       renderUsage(e);
-      setBusy(state.busy); // re-evaluate row visibility
+      refreshBalance();
       break;
     case "notice":
       addSystemLine(e.message);
@@ -490,7 +491,6 @@ async function submitPrompt() {
   promptInput.value = "";
   autosize();
   addUserBlock(prompt, images);
-  state.imagesSent += images.length;
   setBusy(true);
   try {
     if (state.sessionActive) {
@@ -520,11 +520,11 @@ async function newSession() {
   state.toolCards.clear();
   state.alwaysAllow.clear();
   state.attachments = [];
-  state.imagesSent = 0;
+  state.usage = null;
   state.sessionModel = null;
   renderAttachments();
   setBusy(false);
-  usageText.textContent = "";
+  renderUsage(); // token totals reset; account balance stays visible
   chat.querySelectorAll(".block").forEach((b) => b.remove());
   emptyState.classList.remove("hidden");
   promptInput.focus();
@@ -614,6 +614,7 @@ async function portalConnect() {
   if (res.ok) {
     tokenBanner.classList.add("hidden");
     closeTokenPrompt();
+    refreshBalance();
     return;
   }
   if (res.error === "cancelled") return; // user backed out; no error to show
@@ -629,6 +630,7 @@ async function saveToken() {
   tokenInput.value = "";
   tokenBanner.classList.toggle("hidden", hasToken);
   closeTokenPrompt();
+  if (hasToken) refreshBalance();
 }
 
 portalConnectBtn.addEventListener("click", portalConnect);
@@ -651,7 +653,7 @@ tokenInput.addEventListener("keydown", (e) => {
   cwdChip.textContent = info.cwd;
   document.getElementById("empty-cwd").textContent = info.cwd;
   tokenBanner.classList.toggle("hidden", info.hasToken);
-  state.imageSurchargeUsd = info.imageSurchargeUsd ?? 0;
+  if (info.hasToken) refreshBalance();
   for (const m of info.models) {
     state.models.set(m.id, m);
     const opt = document.createElement("option");

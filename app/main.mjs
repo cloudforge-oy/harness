@@ -176,12 +176,33 @@ ipcMain.handle("app:info", async () => {
     defaultModel: process.env.CLOUDCODE_MODEL ?? catalog.models[0].id,
     currency: catalog.currency ?? "USD",
     unit: catalog.unit ?? "per 1M tokens",
-    imageSurchargeUsd: catalog.image_surcharge_usd ?? 0,
     baseUrl: process.env.CLOUDCODE_BASE_URL ?? "https://api.cloudcode.one/v1",
     portalBase: PORTAL_BASE,
     hasToken: Boolean(process.env.CLOUDCODE_TOKEN),
     versions: { electron: process.versions.electron, node: process.versions.node },
   };
+});
+
+// Account balance from the portal; null when there's no token or the fetch
+// fails, so the renderer just omits the balance from the usage line.
+ipcMain.handle("app:balance", async () => {
+  const token = process.env.CLOUDCODE_TOKEN;
+  if (!token) return null;
+  try {
+    const res = await fetch(`${PORTAL_BASE}/api/balance`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (typeof data?.balance !== "number" || typeof data?.used !== "number") {
+      throw new TypeError("malformed balance response");
+    }
+    return { currency: data.currency ?? "USD", balance: data.balance, used: data.used };
+  } catch (err) {
+    console.warn(`balance fetch failed (${err.message})`);
+    return null;
+  }
 });
 
 // Token entered in the UI lives in this process's env only — never written to disk.

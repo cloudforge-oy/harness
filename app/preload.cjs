@@ -9,6 +9,7 @@ const subscribe = (channel, cb) => {
 
 contextBridge.exposeInMainWorld("harness", {
   info: () => ipcRenderer.invoke("app:info"),
+  balance: () => ipcRenderer.invoke("app:balance"),
   setToken: (token) => ipcRenderer.invoke("app:set-token", token),
   portalConnect: () => ipcRenderer.invoke("app:portal-connect"),
   portalCancel: () => ipcRenderer.send("app:portal-cancel"),
