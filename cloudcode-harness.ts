@@ -60,9 +60,14 @@ export interface CloudcodeModel {
   vision?: boolean;
 }
 
+// max_tokens 32768 verified accepted by the gateway; 8192 truncated large
+// tool calls (a 48k-char editor write is ~12k tokens) mid-JSON, which surfaced
+// as unparseable/empty tool arguments from weak models.
+const MODEL_MAX_TOKENS = 32_768;
+
 const FALLBACK_KNOWN_MODELS = {
-  "deepseek-v4-pro":   { maxTokens: 8192, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
-  "deepseek-v4-flash": { maxTokens: 8192, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
+  "deepseek-v4-pro":   { maxTokens: MODEL_MAX_TOKENS, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
+  "deepseek-v4-flash": { maxTokens: MODEL_MAX_TOKENS, contextWindow: 128_000, supportsImages: true, inputPrice: 0, outputPrice: 0 },
 } as unknown as CoreSessionConfig["knownModels"];
 
 /** Catalog entries -> core ModelInfo, so core's usage events carry a real
@@ -74,7 +79,7 @@ function toKnownModels(models?: CloudcodeModel[]): CoreSessionConfig["knownModel
   const known: Record<string, unknown> = {};
   for (const m of models) {
     known[m.id] = {
-      maxTokens: 8192,
+      maxTokens: MODEL_MAX_TOKENS,
       contextWindow: 128_000,
       supportsImages: true,
       supportsPromptCache: m.cached_input != null,
@@ -195,6 +200,11 @@ function cloudcodeConfig(opts: {
     apiKey: cloudcodeToken(),
     baseUrl: cloudcodeBaseUrl(),           // <-- your gateway
     knownModels: toKnownModels(opts.models),
+    // Without this the provider requests max_tokens=4096 (knownModels alone
+    // doesn't raise it — core plumbs maxTokensPerTurn into the request),
+    // truncating large tool calls mid-JSON — the source of "invalid JSON
+    // arguments" / empty-input tool calls from weak models.
+    maxTokensPerTurn: MODEL_MAX_TOKENS,
     systemPrompt: opts.systemPrompt,
     cwd: opts.cwd,
     mode: "act",
