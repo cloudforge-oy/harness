@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("harness", {
   info: () => ipcRenderer.invoke("app:info"),
   balance: () => ipcRenderer.invoke("app:balance"),
   setToken: (token) => ipcRenderer.invoke("app:set-token", token),
+  clearToken: () => ipcRenderer.invoke("app:clear-token"),
   portalConnect: () => ipcRenderer.invoke("app:portal-connect"),
   portalCancel: () => ipcRenderer.send("app:portal-cancel"),
   openDashboard: () => ipcRenderer.send("app:open-dashboard"),

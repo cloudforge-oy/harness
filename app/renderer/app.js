@@ -27,6 +27,9 @@ const portalStatus = document.getElementById("portal-status");
 const portalCancelBtn = document.getElementById("portal-cancel");
 const portalError = document.getElementById("portal-error");
 const portalDashboardBtn = document.getElementById("portal-dashboard");
+const accountBtn = document.getElementById("account-btn");
+const tokenText = document.getElementById("token-text");
+const tokenForgetBtn = document.getElementById("token-forget");
 
 const state = {
   cwd: "",
@@ -40,6 +43,8 @@ const state = {
   models: new Map(),      // id -> models.json entry (prices in USD per 1M tokens)
   usage: null,            // last usage event (token totals)
   balance: null,          // { currency, balance, used } from /api/balance
+  hasToken: false,        // a gateway key is present in the main process
+  keyRejected: false,     // the gateway/portal refused it (rotated or revoked)
   sessionModel: null,     // model the active session was started with
 };
 
@@ -208,8 +213,13 @@ function addSystemLine(text) {
   addBlock(el("div", "block system", text));
 }
 
+// Gateway wording varies ("Authentication Error", "Invalid proxy server token
+// passed", 401) — all of them mean the key needs replacing, not retrying.
+const AUTH_ERROR_RE = /\b401\b|authentication error|unauthorized|invalid[^]{0,24}(api key|token)/i;
+
 function addErrorLine(text) {
   addBlock(el("div", "block error-msg", text));
+  if (AUTH_ERROR_RE.test(text)) setKeyRejected(true);
 }
 
 // tool card: "⏺ Bash(command…)" + "⎿ result preview", click to expand
@@ -334,7 +344,11 @@ function modelTooltip(m) {
 // from the portal's /api/balance (refetched after every usage event)
 // ---------------------------------------------------------------------------
 async function refreshBalance() {
-  state.balance = await window.harness.balance();
+  const res = await window.harness.balance();
+  // A 401 from the portal is the earliest sign a key was rotated or revoked.
+  if (res?.error === "unauthorized") setKeyRejected(true);
+  else if (res) setKeyRejected(false);
+  state.balance = typeof res?.balance === "number" ? res : null;
   renderUsage();
 }
 
@@ -578,6 +592,57 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e)
 // ---------------------------------------------------------------------------
 let portalBusy = false;
 
+const BANNER_TEXT = {
+  disconnected: "Not connected to cloudcode.one — requests to the gateway will fail. Click here to connect.",
+  rejected: "Your cloudcode.one key was rejected — it may have been rotated or revoked. Click here to reconnect.",
+};
+
+const TOKEN_TEXT = {
+  disconnected: "No gateway key was found. Approve Harness in the cloudcode.one portal to fetch your API key automatically.",
+  rejected: "The stored key was rejected — if it was rotated or revoked, reconnect to fetch a fresh one, or forget it and paste a new one.",
+  connected: "Harness has a key for cloudcode.one. Reconnect to replace it with a fresh one, or forget it to disconnect.",
+};
+
+// Key state drives both the banner and the dialog: with a key already present
+// the dialog turns into a reconnect/forget panel rather than a first-run prompt.
+function renderConnectionState() {
+  let kind = "connected";
+  if (!state.hasToken) kind = "disconnected";
+  else if (state.keyRejected) kind = "rejected";
+
+  tokenBanner.classList.toggle("hidden", kind === "connected");
+  tokenBanner.classList.toggle("danger", kind === "rejected");
+  if (kind !== "connected") tokenBanner.textContent = BANNER_TEXT[kind];
+
+  tokenText.textContent = TOKEN_TEXT[kind];
+  portalConnectBtn.textContent = state.hasToken
+    ? "Reconnect with cloudcode.one"
+    : "Connect with cloudcode.one";
+  tokenForgetBtn.classList.toggle("hidden", !state.hasToken);
+}
+
+function setKeyRejected(rejected) {
+  if (state.keyRejected === rejected) return;
+  state.keyRejected = rejected;
+  renderConnectionState();
+}
+
+// The escape hatch for a rotated key: drop the stored copy so the next connect
+// starts clean instead of re-reading a key the gateway no longer accepts.
+async function forgetKey() {
+  const res = await window.harness.clearToken();
+  state.hasToken = res.hasToken;
+  state.keyRejected = false;
+  state.balance = null;
+  renderUsage();
+  renderConnectionState();
+  tokenInput.value = "";
+  tokenInput.focus();
+  if (res.envTokenReturnsOnRestart) {
+    addSystemLine("Key cleared for this run — CLOUDCODE_TOKEN is set in your environment, so it returns on the next launch.");
+  }
+}
+
 function openTokenPrompt() {
   tokenOverlay.classList.remove("hidden");
   portalConnectBtn.focus();
@@ -612,9 +677,14 @@ async function portalConnect() {
   const res = await window.harness.portalConnect();
   setPortalBusy(false);
   if (res.ok) {
-    tokenBanner.classList.add("hidden");
+    state.hasToken = true;
+    state.keyRejected = false;
+    renderConnectionState();
     closeTokenPrompt();
     refreshBalance();
+    // The gateway key is read when a session starts, so a live one keeps using
+    // the old key until it's restarted.
+    if (state.sessionActive) addSystemLine("Reconnected — start a new session for the new key to take effect.");
     return;
   }
   if (res.error === "cancelled") return; // user backed out; no error to show
@@ -628,9 +698,12 @@ async function saveToken() {
   if (!value) return;
   const { hasToken } = await window.harness.setToken(value);
   tokenInput.value = "";
-  tokenBanner.classList.toggle("hidden", hasToken);
+  state.hasToken = hasToken;
+  state.keyRejected = false;
+  renderConnectionState();
   closeTokenPrompt();
   if (hasToken) refreshBalance();
+  if (state.sessionActive) addSystemLine("Key updated — start a new session for it to take effect.");
 }
 
 portalConnectBtn.addEventListener("click", portalConnect);
@@ -638,7 +711,9 @@ portalCancelBtn.addEventListener("click", () => window.harness.portalCancel());
 portalDashboardBtn.addEventListener("click", () => window.harness.openDashboard());
 tokenSaveBtn.addEventListener("click", saveToken);
 tokenSkipBtn.addEventListener("click", closeTokenPrompt);
+tokenForgetBtn.addEventListener("click", forgetKey);
 tokenBanner.addEventListener("click", openTokenPrompt);
+accountBtn.addEventListener("click", openTokenPrompt);
 tokenInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") saveToken();
   if (e.key === "Escape") closeTokenPrompt();
@@ -652,7 +727,8 @@ tokenInput.addEventListener("keydown", (e) => {
   state.cwd = info.cwd;
   cwdChip.textContent = info.cwd;
   document.getElementById("empty-cwd").textContent = info.cwd;
-  tokenBanner.classList.toggle("hidden", info.hasToken);
+  state.hasToken = info.hasToken;
+  renderConnectionState();
   if (info.hasToken) refreshBalance();
   for (const m of info.models) {
     state.models.set(m.id, m);

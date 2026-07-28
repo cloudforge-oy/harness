@@ -1,7 +1,7 @@
 {
   "name": "harness",
   "productName": "Harness",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Agent harness on @cline/core with a Claude-Code-style desktop UI, talking to the cloudcode.one gateway.",
   "author": "CloudForge Oy <hello@cloudcode.one>",
   "homepage": "https://cloudcode.one",

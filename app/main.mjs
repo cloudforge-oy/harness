@@ -106,6 +106,10 @@ async function closeSession() {
 // ---------------------------------------------------------------------------
 const keyFilePath = () => path.join(app.getPath("userData"), "cloudcode-key.bin");
 
+// An externally set CLOUDCODE_TOKEN is back on the next launch, so "forget key"
+// can only clear it for this run — the renderer says so when that's the case.
+const ENV_TOKEN_AT_LAUNCH = Boolean(process.env.CLOUDCODE_TOKEN);
+
 function loadStoredKey() {
   try {
     if (!safeStorage.isEncryptionAvailable()) return null;
@@ -119,6 +123,15 @@ function storeKey(key) {
   try {
     if (!safeStorage.isEncryptionAvailable()) return false;
     fs.writeFileSync(keyFilePath(), safeStorage.encryptString(key), { mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function forgetStoredKey() {
+  try {
+    fs.rmSync(keyFilePath(), { force: true });
     return true;
   } catch {
     return false;
@@ -193,6 +206,9 @@ ipcMain.handle("app:balance", async () => {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5000),
     });
+    // A rotated or revoked key surfaces here first — tell the renderer so it can
+    // prompt for a reconnect instead of silently showing no balance.
+    if (res.status === 401 || res.status === 403) return { error: "unauthorized" };
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (typeof data?.balance !== "number" || typeof data?.used !== "number") {
@@ -210,6 +226,15 @@ ipcMain.handle("app:set-token", (_e, token) => {
   const value = String(token ?? "").trim();
   if (value) process.env.CLOUDCODE_TOKEN = value;
   return { hasToken: Boolean(process.env.CLOUDCODE_TOKEN) };
+});
+
+// Drop the current key — the escape hatch when it's been rotated or revoked and
+// the stored copy keeps getting rejected. Clears both the keychain copy and this
+// process's env; a key inherited from the environment returns on next launch.
+ipcMain.handle("app:clear-token", () => {
+  forgetStoredKey();
+  delete process.env.CLOUDCODE_TOKEN;
+  return { hasToken: false, envTokenReturnsOnRestart: ENV_TOKEN_AT_LAUNCH };
 });
 
 // Browser-based key retrieval; resolves once the user approves in the portal.

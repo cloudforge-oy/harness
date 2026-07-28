@@ -202,6 +202,11 @@ body {
   cursor: pointer;
 }
 .banner:hover { filter: brightness(1.08); }
+.banner.danger {
+  background: var(--destructive-soft);
+  border-bottom-color: var(--destructive);
+  color: var(--destructive);
+}
 
 /* ---------------- token overlay (shadcn dialog) ---------------- */
 .overlay {
@@ -321,7 +326,8 @@ body {
   font-size: 12.5px;
   color: var(--destructive);
 }
-#portal-dashboard {
+#portal-dashboard,
+#token-forget {
   margin-top: 8px;
   height: 32px;
   border-radius: var(--radius-md);
@@ -335,7 +341,10 @@ body {
   color: var(--foreground);
   box-shadow: var(--shadow-xs);
 }
-#portal-dashboard:hover { background: var(--accent); color: var(--accent-foreground); }
+#portal-dashboard:hover,
+#token-forget:hover { background: var(--accent); color: var(--accent-foreground); }
+#token-forget { width: 100%; color: var(--destructive); }
+#token-forget:hover { background: var(--destructive-soft); color: var(--destructive); }
 .token-divider {
   display: flex;
   align-items: center;
