@@ -100,12 +100,60 @@ still fails with the original error. The patch is idempotent and aborts the
 install loudly if a `@cline` version bump changes the parser (re-verify the
 anchor in the script against the new version, then update it).
 
+`scripts/patch-cline-lenient-tools.mjs` and `scripts/patch-cline-thinking.mjs`
+(also postinstall) patch `@cline/llms` / `@cline/core` / `ai` the same way — weak-model
+tool leniency and the thinking-block round trip described above. Each patch is
+idempotent, checks its own anchor, and fails the install loudly on drift.
+
+## GLM thinking (preserved thinking)
+
+GLM reasons on every turn by default, the gateway streams that back as Anthropic
+`thinking` blocks, and z.ai's
+[preserved thinking](https://docs.z.ai/guides/capabilities/thinking-mode) keeps
+the reasoning from earlier assistant turns in the model's context instead of it
+being dropped — better continuity in a coding loop, higher cache hits. It works
+end to end over `/v1/messages` only if both sides hold up their half.
+
+**Gateway half** (`litellm_hooks.py` / `litellm_config.yaml`, not this repo).
+`async_pre_call_deployment_hook` rewrites litellm's internal `thinking_blocks`
+into `reasoning_content` — the field the upstreams actually read — and drops any
+client-sent `thinking` param, which used to make litellm bridge the call to
+`/v1/responses` and 404. The `clear_thinking: false` switch is decisive (0/3 vs
+3/3 recall of a fact planted in prior reasoning) and lives per deployment,
+because the spelling differs by backend: `thinking: {type: enabled,
+clear_thinking: false}` for z.ai, `chat_template_kwargs: {clear_thinking: false}`
+for the hosted vLLM on nube.sh, which 400s on z.ai's shape. On the response side
+`_ThinkingStreamFixer` repairs the bridged streaming path (it used to hardcode
+the first content block to `text` and then pump `thinking_delta`s into it, so a
+streamed GLM answer carried no thinking block at all) and signs the blocks;
+DeepSeek's own UUID signatures pass through untouched.
+
+**Client half** (this repo). Send the model's own thinking blocks back
+unmodified, which needs the block's `signature` to survive the stream — the AI
+SDK silently drops any reasoning block it can't attach one to ("unsupported
+reasoning metadata"), and `@cline/llms` 0.0.54 loses it in two places.
+`scripts/patch-cline-thinking.mjs` (postinstall) fixes that; smoke-test phase 3
+asserts turn 2 really put the earlier thinking block on the wire.
+
+The app deliberately sets no `thinking` / `reasoningEffort` /
+`thinkingBudgetTokens`: preserved thinking is configured per deployment on the
+gateway, and a client-sent `thinking` param is dropped there anyway.
+
+Two consequences worth knowing: reasoning from every prior turn stays in context,
+so input token counts grow faster on long GLM conversations; and the rewrite is
+`/v1/messages`-only — OpenAI-shape clients still have their reasoning stripped.
+
 ## Smoke test
 
 ```bash
 npm run smoke                      # phase 1: offline SDK surface probe
 CLOUDCODE_TOKEN=sk-... npm run smoke   # + phase 2: one live gateway turn
+                                       #   phase 3: thinking round trip (GLM)
 ```
+
+Phase 3 runs two turns on `glm-5.2` (`CLOUDCODE_THINKING_MODEL` overrides) and
+inspects the outgoing request bodies: it fails if the model's thinking blocks
+didn't make it into turn 2, and skips if the model didn't think that run.
 
 ## How the app works
 

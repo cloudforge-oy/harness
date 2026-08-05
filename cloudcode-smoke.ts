@@ -156,12 +156,108 @@ async function phase2(cline: ClineCore): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3 — thinking round trip (online, GLM)
+// ---------------------------------------------------------------------------
+// Preserved thinking needs the client to send the model's own thinking blocks
+// back, unmodified, on every later turn. @cline/llms loses the block signature
+// while streaming, which makes the AI SDK drop them ("unsupported reasoning
+// metadata"); scripts/patch-cline-thinking.mjs fixes that. This asserts the
+// fix is in force: run two turns and inspect what turn 2 actually put on the
+// wire. Fails if the reasoning went missing, skips if the model didn't think.
+// ---------------------------------------------------------------------------
+async function phase3(): Promise<void> {
+  console.log("\nPhase 3 — thinking round trip (GLM)");
+  if (!TOKEN) {
+    console.log("  \x1b[33mSKIP\x1b[0m no CLOUDCODE_TOKEN set");
+    return;
+  }
+  const model = process.env.CLOUDCODE_THINKING_MODEL ?? "glm-5.2";
+
+  // Watch the outgoing requests: the AI SDK builds them from the stored
+  // history, so they are the only honest view of what survived the round trip.
+  const realFetch = globalThis.fetch;
+  const assistantBlocks: string[][] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/messages") && typeof init?.body === "string") {
+      const messages = JSON.parse(init.body).messages as { role: string; content: unknown }[];
+      for (const m of messages) {
+        if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+        assistantBlocks.push(
+          (m.content as { type: string; signature?: string }[]).map(
+            (c) => c.type + (c.type === "thinking" ? `(sig=${c.signature ? "yes" : "no"})` : ""),
+          ),
+        );
+      }
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+
+  try {
+    const { runAgentSession } = await import("./cloudcode-harness.js");
+    let sawReasoning = false;
+    let done = () => {};
+    const turnDone = () => new Promise<void>((r) => (done = r));
+    const settled = turnDone();
+
+    const session = await runAgentSession({
+      prompt:
+        "A farmer has 17 sheep; all but 9 run away. He then buys twice as many as remain. " +
+        "How many sheep? Think it through, then answer with the number. Do not use tools.",
+      cwd: process.cwd(),
+      systemPrompt: "You are a smoke test. Reason briefly, then answer.",
+      model,
+      onEvent: (event) => {
+        const inner = (event as { payload?: { event?: { type?: string; contentType?: string } } }).payload?.event;
+        if (inner?.contentType === "reasoning") sawReasoning = true;
+        if (inner?.type === "done") done();
+      },
+      onApprovalRequest: async () => ({ approved: true }),
+    });
+
+    const waitTurn = (p: Promise<void>) =>
+      Promise.race([p, new Promise<void>((r) => setTimeout(r, 60_000))]);
+    await waitTurn(settled);
+    if (!sawReasoning) {
+      console.log(`  \x1b[33mSKIP\x1b[0m ${model} returned no thinking blocks this run`);
+      await session.close().catch(() => {});
+      return;
+    }
+    ok(`${model} streamed thinking blocks`);
+
+    const second = turnDone();
+    await session.send("Now double that number. Answer with the number only.");
+    await waitTurn(second);
+    await session.close().catch(() => {});
+
+    const withThinking = assistantBlocks.filter((b) => b.some((t) => t.startsWith("thinking")));
+    check(
+      "turn 2 sent the earlier thinking block back",
+      withThinking.length > 0 && withThinking.every((b) => b.includes("thinking(sig=yes)")),
+    );
+    if (withThinking.length === 0) {
+      console.log(
+        "    assistant history on the wire: " +
+          `${assistantBlocks.map((b) => `[${b.join(",")}]`).join(" ") || "(none)"}\n` +
+          "    (reasoning was dropped — re-run `node scripts/patch-cline-thinking.mjs`, " +
+          "or re-verify it against the installed @cline/llms)",
+      );
+    }
+  } catch (e) {
+    bad("thinking round trip", e);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+// ---------------------------------------------------------------------------
 (async () => {
   console.log("cloudcode.one harness smoke test — @cline/core");
   const cline = await phase1();
   if (cline) {
     await phase2(cline);
     await cline.dispose().catch(() => {});
+    await phase3();
   } else {
     console.log("\nPhase 2 skipped — core did not initialize.");
   }

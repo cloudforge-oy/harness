@@ -92,6 +92,27 @@ function toKnownModels(models?: CloudcodeModel[]): CoreSessionConfig["knownModel
 }
 
 // ===========================================================================
+// 1b. GLM THINKING — why there is no `thinking` / `reasoningEffort` here
+// ---------------------------------------------------------------------------
+// GLM thinks on every turn by default (z.ai's "thinking mode"), and the gateway
+// streams that back as Anthropic `thinking` blocks, so the UI gets a thinking
+// section for free. z.ai's Preserved Thinking — keeping earlier turns' reasoning
+// in context (https://docs.z.ai/guides/capabilities/thinking-mode) — is switched
+// on per deployment INSIDE the gateway, because the spelling differs by backend
+// (z.ai wants thinking.clear_thinking, the hosted vLLM wants
+// chat_template_kwargs.clear_thinking and 400s on z.ai's shape).
+//
+// So a `thinking` object on the request buys us nothing: the gateway drops it
+// before the upstream call (it used to make litellm bridge the call to
+// /v1/responses and 404). Setting config.thinking / reasoningEffort /
+// thinkingBudgetTokens is what would put one there, hence their absence.
+//
+// Our half of preserved thinking is returning the model's own thinking blocks
+// verbatim on later turns, which hinges on their signatures surviving the
+// stream — see scripts/patch-cline-thinking.mjs and the README section.
+// ===========================================================================
+
+// ===========================================================================
 // 2. TOOL APPROVAL
 // ---------------------------------------------------------------------------
 // Two levers, used together:
